@@ -21,6 +21,6 @@ func (t test1) OnRecv(conn net.Conn, Adata []byte, len int) bool {
 }
 
 func main() {
-	tcpframe := NewGLNetFrame("127.0.0.1", 9997, test1{})
+	tcpframe := NewNetFrame("127.0.0.1", 9997, test1{})
 	tcpframe.Start()
 }

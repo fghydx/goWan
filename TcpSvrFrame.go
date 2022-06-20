@@ -9,14 +9,14 @@ import (
 	"sync"
 )
 
-type GLTcpNetFrameIntf interface {
+type TcpNetIntf interface {
 	OnConnect(conn net.Conn) bool
 	OnDisconnect(conn net.Conn)
 	OnError(conn net.Conn, err error)
 	OnRecv(conn net.Conn, Adata []byte, len int) bool
 }
 
-type GLTcpNetFrame struct {
+type TcpNetFrame struct {
 	chanConnect chan tcpStatusMsg
 	listen      net.Listener
 	ListenAddr  string
@@ -26,7 +26,7 @@ type GLTcpNetFrame struct {
 }
 
 type GLTcpNetObj struct {
-	TcpNetObj GLTcpNetFrameIntf
+	TcpNetObj TcpNetIntf
 	conn      net.Conn
 }
 
@@ -48,21 +48,21 @@ type tcpStatusMsg struct {
 	tag     chan byte
 }
 
-func NewGLNetFrame(ListenAddr string, ListenPort int, impl interface{}) *GLTcpNetFrame {
-	if _, ok := impl.(GLTcpNetFrameIntf); !ok {
+func NewNetFrame(ListenAddr string, ListenPort int, impl interface{}) *TcpNetFrame {
+	if _, ok := impl.(TcpNetIntf); !ok {
 		panic("没有实现接口")
 	}
-	result := &GLTcpNetFrame{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjType(impl)}
+	result := &TcpNetFrame{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjType(impl)}
 	result.NetObjPool = sync.Pool{New: func() any {
 		var TcpObj GLTcpNetObj
 		TcpObj.conn = nil
-		TcpObj.TcpNetObj = ToolsOther.CreateObjFromType(result.frameIntf).(GLTcpNetFrameIntf)
+		TcpObj.TcpNetObj = ToolsOther.CreateObjFromType(result.frameIntf).(TcpNetIntf)
 		return TcpObj
 	}}
 	return result
 }
 
-func (NetFrame *GLTcpNetFrame) msgbordcast() {
+func (NetFrame *TcpNetFrame) msgbordcast() {
 	ok := false
 	var tcpMsg tcpStatusMsg
 	for {
@@ -86,7 +86,7 @@ func (NetFrame *GLTcpNetFrame) msgbordcast() {
 	}
 }
 
-func (NetFrame *GLTcpNetFrame) Start() error {
+func (NetFrame *TcpNetFrame) Start() error {
 	var err error
 	NetFrame.listen, err = net.Listen("tcp", NetFrame.ListenAddr+":"+strconv.Itoa(NetFrame.ListenPort))
 	if err != nil {
@@ -107,11 +107,11 @@ func (NetFrame *GLTcpNetFrame) Start() error {
 	}
 }
 
-func (NetFrame *GLTcpNetFrame) Stop() {
+func (NetFrame *TcpNetFrame) Stop() {
 	NetFrame.listen.Close()
 }
 
-func (Netobj *GLTcpNetObj) handleConnection(NetFrame *GLTcpNetFrame) {
+func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
 	defer func() {
 		Netobj.conn = nil
 		NetFrame.NetObjPool.Put(*Netobj)
