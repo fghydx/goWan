@@ -13,7 +13,7 @@ type TcpNetIntf interface {
 	OnConnect(conn net.Conn) bool
 	OnDisconnect(conn net.Conn)
 	OnError(conn net.Conn, err error)
-	OnRecv(conn net.Conn, Adata []byte, len int) bool
+	OnReadData(conn net.Conn) (closed bool, err error)
 }
 
 type TcpNetFrame struct {
@@ -52,11 +52,11 @@ func NewNetFrame(ListenAddr string, ListenPort int, impl interface{}) *TcpNetFra
 	if _, ok := impl.(TcpNetIntf); !ok {
 		panic("没有实现接口")
 	}
-	result := &TcpNetFrame{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjType(impl)}
+	result := &TcpNetFrame{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjRefType(impl)}
 	result.NetObjPool = sync.Pool{New: func() any {
 		var TcpObj GLTcpNetObj
 		TcpObj.conn = nil
-		TcpObj.TcpNetObj = ToolsOther.CreateObjFromType(result.frameIntf).(TcpNetIntf)
+		TcpObj.TcpNetObj = (ToolsOther.CreateObjFromType(result.frameIntf)).(TcpNetIntf)
 		return TcpObj
 	}}
 	return result
@@ -121,13 +121,13 @@ func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
 	tagchan := make(chan byte)
 	NetFrame.chanConnect <- tcpStatusMsg{netObj: *Netobj, tag: tagchan, errorex: nil, status: connected}
 	if <-tagchan == 1 {
-		//println("不允许连接!")
-		return
+		return //println("不允许连接!")
 	}
 
-	CurData := make([]byte, 1024)
+	closed := false
+	var err error
 	for {
-		readlen, err := conn.Read(CurData)
+		closed, err = Netobj.TcpNetObj.OnReadData(conn)
 		if err != nil {
 			if err == io.EOF {
 				NetFrame.chanConnect <- tcpStatusMsg{netObj: *Netobj, tag: tagchan, errorex: err, status: disconnect}
@@ -137,7 +137,7 @@ func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
 			break
 		}
 
-		if !Netobj.TcpNetObj.OnRecv(conn, CurData, readlen) {
+		if closed {
 			NetFrame.chanConnect <- tcpStatusMsg{netObj: *Netobj, tag: tagchan, errorex: nil, status: close}
 			break
 		}
