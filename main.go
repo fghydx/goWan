@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/fghydx/goWan/TCPSvrNormal"
 	"io"
 	"net"
 )
@@ -49,6 +50,6 @@ func (t *test1) OnReadData(conn net.Conn) (closed bool, err error) {
 }
 
 func main() {
-	tcpframe := NewNetFrame("127.0.0.1", 9998, &test1{})
+	tcpframe := TCPSvrNormal.NewNetFrame("127.0.0.1", 9998, &test1{})
 	tcpframe.Start()
 }

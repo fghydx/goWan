@@ -1,13 +1,14 @@
-package main
+package TCPSvrNormal
 
 import (
+	"github.com/fghydx/goWan"
 	"io"
 	"net"
 	"testing"
 )
 
 type testTcpObj struct {
-	readtype ReadType
+	readtype main.ReadType
 }
 
 func (t *testTcpObj) OnConnect(conn net.Conn) bool {
@@ -24,18 +25,18 @@ func (t *testTcpObj) OnReadData(conn net.Conn) (closed bool, err error) {
 	println("接收数据")
 	b := make([]byte, 1)
 	switch t.readtype {
-	case ReadHead:
+	case main.ReadHead:
 		{
 			_, err = io.ReadFull(conn, b)
-			t.readtype = ReadContent //接收完头，接收内容
+			t.readtype = main.ReadContent //接收完头，接收内容
 		}
-	case ReadContent:
+	case main.ReadContent:
 		{
 			_, err = io.ReadFull(conn, b)
-			t.readtype = ReadHead //接收完内容，接收头
+			t.readtype = main.ReadHead //接收完内容，接收头
 		}
 	default:
-		t.readtype = ReadHead
+		t.readtype = main.ReadHead
 	}
 	return false, err
 }

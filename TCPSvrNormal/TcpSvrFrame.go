@@ -1,4 +1,4 @@
-package main
+package TCPSvrNormal
 
 import (
 	"github.com/fghydx/gobone/ToolsOther"
@@ -38,7 +38,7 @@ const (
 	connected            = 1 //连接上来
 	disconnect           = 2 //对端关闭连接
 	errorex              = 3 //出错
-	close                = 4 //主动关闭连接
+	shutdown             = 4 //主动关闭连接
 )
 
 type tcpStatusMsg struct {
@@ -74,7 +74,7 @@ func (NetFrame *TcpNetFrame) msgbordcast() {
 				} else {
 					tcpMsg.tag <- 0
 				}
-			} else if (tcpMsg.status == disconnect) || (tcpMsg.status == close) {
+			} else if (tcpMsg.status == disconnect) || (tcpMsg.status == shutdown) {
 				tcpMsg.netObj.TcpNetObj.OnDisconnect(tcpMsg.netObj.conn)
 			} else if tcpMsg.status == errorex {
 				tcpMsg.netObj.TcpNetObj.OnError(tcpMsg.netObj.conn, tcpMsg.errorex)
@@ -109,6 +109,7 @@ func (NetFrame *TcpNetFrame) Start() error {
 
 func (NetFrame *TcpNetFrame) Stop() {
 	NetFrame.listen.Close()
+	close(NetFrame.chanConnect)
 }
 
 func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
@@ -138,7 +139,7 @@ func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
 		}
 
 		if closed {
-			NetFrame.chanConnect <- tcpStatusMsg{netObj: *Netobj, tag: tagchan, errorex: nil, status: close}
+			NetFrame.chanConnect <- tcpStatusMsg{netObj: *Netobj, tag: tagchan, errorex: nil, status: shutdown}
 			break
 		}
 	}
