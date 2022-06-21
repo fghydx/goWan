@@ -1,5 +1,9 @@
 package TCPSvrNormal
 
+/*
+	TCP
+*/
+
 import (
 	"github.com/fghydx/gobone/ToolsOther"
 	"io"
@@ -9,14 +13,7 @@ import (
 	"sync"
 )
 
-type TcpNetIntf interface {
-	OnConnect(conn net.Conn) bool
-	OnDisconnect(conn net.Conn)
-	OnError(conn net.Conn, err error)
-	OnReadData(conn net.Conn) (closed bool, err error)
-}
-
-type TcpNetFrame struct {
+type TcpNet struct {
 	chanConnect chan tcpStatusMsg
 	listen      net.Listener
 	ListenAddr  string
@@ -25,8 +22,8 @@ type TcpNetFrame struct {
 	frameIntf   reflect.Type
 }
 
-type GLTcpNetObj struct {
-	TcpNetObj TcpNetIntf
+type TcpNetObj struct {
+	TcpNetObj ITcpNet
 	conn      net.Conn
 }
 
@@ -42,27 +39,27 @@ const (
 )
 
 type tcpStatusMsg struct {
-	netObj  GLTcpNetObj
+	netObj  TcpNetObj
 	status  tcpStatus
 	errorex error
 	tag     chan byte
 }
 
-func NewNetFrame(ListenAddr string, ListenPort int, impl interface{}) *TcpNetFrame {
-	if _, ok := impl.(TcpNetIntf); !ok {
+func NewNetFrame(ListenAddr string, ListenPort int, impl interface{}) *TcpNet {
+	if _, ok := impl.(ITcpNet); !ok {
 		panic("没有实现接口")
 	}
-	result := &TcpNetFrame{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjRefType(impl)}
+	result := &TcpNet{chanConnect: make(chan tcpStatusMsg), ListenAddr: ListenAddr, ListenPort: ListenPort, frameIntf: ToolsOther.GetObjRefType(impl)}
 	result.NetObjPool = sync.Pool{New: func() any {
-		var TcpObj GLTcpNetObj
+		var TcpObj TcpNetObj
 		TcpObj.conn = nil
-		TcpObj.TcpNetObj = (ToolsOther.CreateObjFromType(result.frameIntf)).(TcpNetIntf)
+		TcpObj.TcpNetObj = (ToolsOther.CreateObjFromType(result.frameIntf)).(ITcpNet)
 		return TcpObj
 	}}
 	return result
 }
 
-func (NetFrame *TcpNetFrame) msgbordcast() {
+func (NetFrame *TcpNet) msgbordcast() {
 	ok := false
 	var tcpMsg tcpStatusMsg
 	for {
@@ -86,7 +83,7 @@ func (NetFrame *TcpNetFrame) msgbordcast() {
 	}
 }
 
-func (NetFrame *TcpNetFrame) Start() error {
+func (NetFrame *TcpNet) Start() error {
 	var err error
 	NetFrame.listen, err = net.Listen("tcp", NetFrame.ListenAddr+":"+strconv.Itoa(NetFrame.ListenPort))
 	if err != nil {
@@ -101,18 +98,18 @@ func (NetFrame *TcpNetFrame) Start() error {
 		if err != nil {
 			panic(err)
 		}
-		TcpObj := NetFrame.NetObjPool.Get().(GLTcpNetObj)
+		TcpObj := NetFrame.NetObjPool.Get().(TcpNetObj)
 		TcpObj.conn = conn
 		go TcpObj.handleConnection(NetFrame)
 	}
 }
 
-func (NetFrame *TcpNetFrame) Stop() {
+func (NetFrame *TcpNet) Stop() {
 	NetFrame.listen.Close()
 	close(NetFrame.chanConnect)
 }
 
-func (Netobj *GLTcpNetObj) handleConnection(NetFrame *TcpNetFrame) {
+func (Netobj *TcpNetObj) handleConnection(NetFrame *TcpNet) {
 	defer func() {
 		Netobj.conn = nil
 		NetFrame.NetObjPool.Put(*Netobj)
