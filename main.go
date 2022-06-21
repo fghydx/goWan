@@ -51,5 +51,8 @@ func (t *test1) OnReadData(conn net.Conn) (closed bool, err error) {
 
 func main() {
 	tcpframe := TCPSvrNormal.NewNetFrame("127.0.0.1", 9998, &test1{})
-	tcpframe.Start()
+	err := tcpframe.Start()
+	if err != nil {
+		panic(err)
+	}
 }
