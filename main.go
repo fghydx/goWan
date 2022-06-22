@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/fghydx/goWan/TCPSvrNormal"
+	"github.com/fghydx/goWan/TCPSvrBase"
 	"io"
 	"net"
 )
@@ -28,6 +28,11 @@ func (t *test1) OnDisconnect(conn net.Conn) {
 func (t *test1) OnError(conn net.Conn, err error) {
 	println("连接错误")
 }
+
+func (t *test1) Init(impl interface{}) {
+	println("初始化")
+}
+
 func (t *test1) OnReadData(conn net.Conn) (closed bool, err error) {
 	println("接收数据")
 	err = nil
@@ -50,7 +55,7 @@ func (t *test1) OnReadData(conn net.Conn) (closed bool, err error) {
 }
 
 func main() {
-	tcpframe := TCPSvrNormal.NewNetFrame("127.0.0.1", 9998, &test1{})
+	tcpframe := TCPSvrBase.NewTcpNetBase("127.0.0.1", 9998, &test1{})
 	err := tcpframe.Start()
 	if err != nil {
 		panic(err)
