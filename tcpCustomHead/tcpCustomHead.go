@@ -30,7 +30,6 @@ type Header struct {
 }
 
 const bufflen = uint32(4096)
-const headlen = 8
 
 type Packet struct {
 	header        Header
@@ -78,7 +77,7 @@ func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, er
 	ok = p.header.dataLen == p.readedDataLen //是否已读完一个请求包的内容
 	handle, exist := HandlerMap[p.header.iD]
 	if exist {
-		handle.Handler(connector, ok, tmpdata)
+		go handle.Handler(connector, ok, tmpdata)
 	}
 	return ok, false, err
 }
