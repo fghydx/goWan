@@ -30,19 +30,22 @@ type (
 	TOnError      func(conn net.Conn, err error)
 )
 
-type ITcpReader interface {
+type ITcpReaderWriter interface {
 	ReadData(connector *Connector) (closed bool, err error)
+	WriteData(connector *Connector, dataEx any, data []byte)
 	Init()
-	NewReader() ITcpReader
+	NewReaderWriter() ITcpReaderWriter
 }
 
 type Connector struct {
-	ConID       uint32
-	Conn        net.Conn
-	status      tcpStatus
-	connectChan chan bool
-	err         error
-	reader      ITcpReader
+	ConID        uint32
+	Conn         net.Conn
+	SendDataChan chan []byte
+	status       tcpStatus
+	svr          Server
+	connectChan  chan bool
+	err          error
+	readerwriter ITcpReaderWriter
 }
 
 type Server struct {
@@ -59,16 +62,16 @@ func (connector *Connector) init() {
 	connector.Conn = nil
 	connector.status = connecting
 	connector.err = nil
-	connector.reader.Init()
+	connector.readerwriter.Init()
 }
 
-func NewServe(addr string, readImpl ITcpReader) *Server {
+func NewServe(addr string, readImpl ITcpReaderWriter) *Server {
 	result := &Server{
 		addr:   addr,
 		doChan: make(chan *Connector),
 	}
 	result.connectorPool = sync.Pool{New: func() any {
-		return &Connector{status: connecting, connectChan: make(chan bool), reader: readImpl.NewReader()}
+		return &Connector{status: connecting, connectChan: make(chan bool), SendDataChan: make(chan []byte, 10000), readerwriter: readImpl.NewReaderWriter()}
 	}}
 	return result
 }
@@ -134,8 +137,8 @@ func (svr *Server) Start() error {
 			continue
 		}
 
-		go svr.handlerConnector(connector)  //处理接收数据
-		go svr.connectorSendData(connector) //处理发送数据
+		go svr.handlerConnector(connector) //处理接收数据
+		go connector.connectorSendData()   //处理发送数据
 	}
 }
 
@@ -159,7 +162,7 @@ func (svr *Server) handlerConnector(connector *Connector) {
 	closed := false
 	var err error
 	for {
-		closed, err = connector.reader.ReadData(connector)
+		closed, err = connector.readerwriter.ReadData(connector)
 		if err != nil {
 			if err == io.EOF {
 				connector.status = disconnect
@@ -180,10 +183,28 @@ func (svr *Server) handlerConnector(connector *Connector) {
 	}
 }
 
-func (svr *Server) connectorSendData(connector *Connector) {
+func (connector *Connector) connectorSendData() {
+exit:
+	for {
+		select {
+		case senddata, ok := <-connector.SendDataChan:
+			{
+				if ok {
+					_, err := connector.Conn.Write(senddata)
+					if err != nil {
+						connector.status = readerr
+						connector.err = err
+						connector.svr.doChan <- connector
+						break exit
+					}
+				}
 
+			}
+		}
+
+	}
 }
 
-func (svr *Server) SendData(connector *Connector, data []byte) {
-
+func (connector *Connector) SendData(dataEx any, data []byte) {
+	connector.readerwriter.WriteData(connector, dataEx, data)
 }

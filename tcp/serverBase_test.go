@@ -11,12 +11,17 @@ type TcpReader struct {
 	i int
 }
 
+func (t *TcpReader) WriteData(connector *Connector, dataEx any, data []byte) {
+	connector.SendDataChan <- data
+}
+
 func (t *TcpReader) ReadData(connector *Connector) (closed bool, err error) {
 	closed = false
 	b := make([]byte, 1)
 	_, err = io.ReadFull(connector.Conn, b)
 	println(fmt.Sprintf("源：%s,值：%v, i:%d, ID:%d", connector.Conn.RemoteAddr().String(), b, t.i, connector.ConID))
 	t.i++
+	connector.SendData(nil, []byte(fmt.Sprintf("源：%s,值：%v, i:%d, ID:%d", connector.Conn.RemoteAddr().String(), b, t.i, connector.ConID)))
 	return
 }
 
@@ -24,7 +29,7 @@ func (t *TcpReader) Init() {
 	t.i = 0
 }
 
-func (t *TcpReader) NewReader() ITcpReader {
+func (t *TcpReader) NewReaderWriter() ITcpReaderWriter {
 	return &TcpReader{
 		i: 0,
 	}

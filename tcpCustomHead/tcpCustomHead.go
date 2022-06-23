@@ -5,16 +5,19 @@ package tcpCustomHead
 */
 
 import (
+	"bytes"
 	"encoding/binary"
 	"github.com/fghydx/goWan/tcp"
 	"github.com/fghydx/goWan/tcpReadPacket"
 	"io"
 )
 
-type THandler = func()
+type HandFunc func(conn *tcp.Connector, packetEnd bool, data []byte)
 
-func RegisterHandler(ID uint32, handler THandler) {
+var HandlerMap = make(map[uint32]IHandler)
 
+func RegisterHandler(ID uint32, handler HandFunc) {
+	HandlerMap[ID] = &handler
 }
 
 type IHandler interface {
@@ -27,12 +30,26 @@ type Header struct {
 }
 
 const bufflen = uint32(4096)
+const headlen = 8
 
 type Packet struct {
 	header        Header
 	readBuff      [bufflen]byte
 	readedDataLen uint32
-	handler       IHandler
+}
+
+func (p *Packet) PackData(dataEx any, data []byte) []byte {
+	datalen := uint32(len(data))
+	buff := bytes.NewBuffer([]byte{})
+	id := uint32(dataEx.(int))
+	_ = binary.Write(buff, binary.LittleEndian, id)
+	_ = binary.Write(buff, binary.LittleEndian, datalen)
+	_ = binary.Write(buff, binary.LittleEndian, data)
+	return buff.Bytes()
+}
+
+func (f HandFunc) Handler(conn *tcp.Connector, packetEnd bool, data []byte) {
+	f(conn, packetEnd, data)
 }
 
 func (p *Packet) ReadHead(connector *tcp.Connector) (ok bool, closed bool, err error) {
@@ -41,7 +58,6 @@ func (p *Packet) ReadHead(connector *tcp.Connector) (ok bool, closed bool, err e
 	err = binary.Read(connector.Conn, binary.LittleEndian, &p.header.iD)
 	err = binary.Read(connector.Conn, binary.LittleEndian, &p.header.dataLen)
 	p.readedDataLen = 0 //读完头， 把已读内容长度设置为0
-	println(p.header.iD, p.header.dataLen)
 	return ok, closed, err
 }
 
@@ -60,8 +76,11 @@ func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, er
 		p.readedDataLen = p.readedDataLen + remainLen
 	}
 	ok = p.header.dataLen == p.readedDataLen //是否已读完一个请求包的内容
-	p.handler.Handler(connector, ok, tmpdata)
-	return
+	handle, exist := HandlerMap[p.header.iD]
+	if exist {
+		handle.Handler(connector, ok, tmpdata)
+	}
+	return ok, false, err
 }
 
 func (p *Packet) NewPacket() tcpReadPacket.IPacket {
@@ -72,6 +91,6 @@ func (p *Packet) Init() {
 	p.readedDataLen = 0
 }
 
-func NewtcpServe(addr string, handler IHandler) *tcp.Server {
+func NewtcpServe(addr string) *tcp.Server {
 	return tcpReadPacket.NewtcpServe(addr, &Packet{})
 }

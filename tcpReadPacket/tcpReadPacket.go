@@ -19,16 +19,21 @@ const (
 type IPacket interface {
 	ReadHead(connector *tcp.Connector) (ok bool, closed bool, err error)
 	ReadContent(connector *tcp.Connector) (ok bool, closed bool, err error)
+	PackData(head any, data []byte) []byte
 	NewPacket() IPacket
 	Init()
 }
 
-type TcpReader struct {
+type TcpReaderWriter struct {
 	readType EnumReadType
 	ipacket  IPacket
 }
 
-func (t *TcpReader) ReadData(connector *tcp.Connector) (closed bool, err error) {
+func (t *TcpReaderWriter) WriteData(connector *tcp.Connector, dataEx any, data []byte) {
+	connector.SendDataChan <- t.ipacket.PackData(dataEx, data)
+}
+
+func (t *TcpReaderWriter) ReadData(connector *tcp.Connector) (closed bool, err error) {
 	closed = false
 	err = nil
 	ok := false
@@ -52,7 +57,7 @@ func (t *TcpReader) ReadData(connector *tcp.Connector) (closed bool, err error) 
 }
 
 func NewtcpServe(addr string, impl IPacket) *tcp.Server {
-	tcpreader := &TcpReader{
+	tcpreader := &TcpReaderWriter{
 		readType: ReadHead,
 		ipacket:  impl,
 	}
@@ -60,13 +65,13 @@ func NewtcpServe(addr string, impl IPacket) *tcp.Server {
 	return result
 }
 
-func (t *TcpReader) Init() {
+func (t *TcpReaderWriter) Init() {
 	t.readType = ReadHead
 	t.ipacket.Init()
 }
 
-func (t *TcpReader) NewReader() tcp.ITcpReader {
-	result := &TcpReader{
+func (t *TcpReaderWriter) NewReaderWriter() tcp.ITcpReaderWriter {
+	result := &TcpReaderWriter{
 		readType: ReadHead,
 	}
 	result.ipacket = t.ipacket.NewPacket()

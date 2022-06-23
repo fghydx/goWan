@@ -12,13 +12,18 @@ type Packet struct {
 	readBuff [4096]byte
 }
 
+func (p *Packet) PackData(dataEx any, data []byte) []byte {
+	return data
+}
+
 func (p *Packet) ReadHead(connector *tcp.Connector) (ok bool, closed bool, err error) {
 	ok = true
 	closed = false
 	err = nil
 	err = binary.Read(connector.Conn, binary.LittleEndian, &p.head)
 	println("读完头了", p.head)
-	return false, closed, err
+	connector.SendData(nil, []byte("读完头了"))
+	return true, closed, err
 }
 
 func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, err error) {
@@ -28,6 +33,7 @@ func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, er
 	b := p.readBuff[:2]
 	_, err = io.ReadFull(connector.Conn, b)
 	println("读完内容了", b)
+	connector.SendData(nil, []byte("读完内容了"))
 	return ok, closed, err
 }
 
