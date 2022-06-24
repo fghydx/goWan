@@ -4,7 +4,6 @@ package tcp
 	传入实现ITcpReader的对像，完成对Socket的读取操作
 */
 import (
-	"context"
 	"io"
 	"math"
 	"net"
@@ -45,8 +44,8 @@ type Connector struct {
 	SendDataChan chan []byte
 	status       tcpStatus
 	svr          Server
-	ctx          context.Context
-	cancel       context.CancelFunc
+	//ctx          context.Context
+	//cancel       context.CancelFunc
 	connectChan  chan bool
 	err          error
 	closeInt     int32 //1为打开状态，2为关闭状态
@@ -141,7 +140,7 @@ func (svr *Server) Start() error {
 			svr.doChan <- connector
 			continue
 		}
-		connector.ctx, connector.cancel = context.WithCancel(context.Background())
+		//connector.ctx, connector.cancel = context.WithCancel(context.Background())
 		go svr.handlerConnector(connector) //处理接收数据
 		go connector.connectorSendData()   //处理发送数据
 	}
@@ -168,10 +167,6 @@ func (svr *Server) handlerConnector(connector *Connector) {
 	var err error
 	for {
 		select {
-		case <-connector.ctx.Done():
-			{
-				return
-			}
 		default:
 			{
 				closed, err = connector.readerwriter.ReadData(connector)
@@ -215,8 +210,6 @@ func (connector *Connector) connectorSendData() {
 				}
 
 			}
-		case <-connector.ctx.Done():
-			return
 		}
 
 	}
@@ -231,5 +224,6 @@ func (connector *Connector) Close() {
 		return
 	}
 	_ = connector.Conn.Close()
-	connector.cancel()
+	close(connector.SendDataChan)
+	//connector.cancel()
 }
