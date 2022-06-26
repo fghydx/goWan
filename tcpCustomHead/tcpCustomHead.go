@@ -7,9 +7,10 @@ package tcpCustomHead
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/fghydx/goWan/tcp"
+	tcp "github.com/fghydx/goWan/tcp"
 	"github.com/fghydx/goWan/tcpReadPacket"
 	"io"
+	"sync/atomic"
 )
 
 type HandFunc func(conn *tcp.Connector, packetEnd bool, data []byte)
@@ -77,7 +78,21 @@ func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, er
 	ok = p.header.dataLen == p.readedDataLen //是否已读完一个请求包的内容
 	handle, exist := HandlerMap[p.header.iD]
 	if exist {
-		go handle.Handler(connector, ok, tmpdata)
+		connector.RLock()
+		if !connector.Closed {
+			atomic.AddInt32(&connector.RefCount, 1)
+		} else {
+			return ok, true, err
+		}
+		defer connector.RUnlock()
+
+		go func() {
+			defer func() {
+				atomic.AddInt32(&connector.RefCount, -1)
+				connector.HandleEnd()
+			}()
+			handle.Handler(connector, ok, tmpdata)
+		}()
 	}
 	return ok, false, err
 }

@@ -2,7 +2,7 @@ package tcpCustomHead
 
 import (
 	"encoding/binary"
-	"github.com/fghydx/goWan/tcp"
+	tcp "github.com/fghydx/goWan/tcp"
 	"io"
 	"net"
 	"strconv"
@@ -17,6 +17,7 @@ func TestNewtcpServe(t *testing.T) {
 		})
 		RegisterHandler(2, func(conn *tcp.Connector, packetEnd bool, data []byte) {
 			conn.SendData(2, append([]byte("我是2"), data...))
+			conn.Stop()
 		})
 		RegisterHandler(3, func(conn *tcp.Connector, packetEnd bool, data []byte) {
 			conn.SendData(3, append([]byte("我是3"), data...))

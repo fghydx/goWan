@@ -5,7 +5,7 @@ package tcpReadPacket
 */
 
 import (
-	"github.com/fghydx/goWan/tcp"
+	tcp "github.com/fghydx/goWan/tcp"
 )
 
 type EnumReadType uint8

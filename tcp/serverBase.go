@@ -1,9 +1,10 @@
-package tcp
+package tcpEx
 
 /*
 	传入实现ITcpReader的对像，完成对Socket的读取操作
 */
 import (
+	"context"
 	"io"
 	"math"
 	"net"
@@ -39,16 +40,18 @@ type ITcpReaderWriter interface {
 }
 
 type Connector struct {
+	sync.RWMutex
 	ConID        uint32
 	Conn         net.Conn
 	SendDataChan chan []byte
+	RefCount     int32
 	status       tcpStatus
-	svr          Server
-	//ctx          context.Context
-	//cancel       context.CancelFunc
+	svr          *Server
+	ctx          context.Context
+	cancel       context.CancelFunc
 	connectChan  chan bool
 	err          error
-	closeInt     int32 //1为打开状态，2为关闭状态
+	Closed       bool
 	readerwriter ITcpReaderWriter
 }
 
@@ -66,17 +69,17 @@ func (connector *Connector) init() {
 	connector.Conn = nil
 	connector.status = connecting
 	connector.err = nil
-	connector.closeInt = 1
+	connector.Closed = false
 	connector.readerwriter.Init()
 }
 
 func NewServe(addr string, readImpl ITcpReaderWriter) *Server {
 	result := &Server{
 		addr:   addr,
-		doChan: make(chan *Connector),
+		doChan: make(chan *Connector, 1000),
 	}
 	result.connectorPool = sync.Pool{New: func() any {
-		return &Connector{status: connecting, connectChan: make(chan bool), SendDataChan: make(chan []byte, 10000), readerwriter: readImpl.NewReaderWriter()}
+		return &Connector{status: connecting, readerwriter: readImpl.NewReaderWriter(), svr: result}
 	}}
 	return result
 }
@@ -87,10 +90,12 @@ func (svr *Server) broadcast() {
 	for {
 		select {
 		case connector, ok = <-svr.doChan:
+			println(connector.ConID, "广播来了", connector.status)
 			if connector.status == connecting {
 				if svr.FOnConnect != nil {
 					connector.connectChan <- svr.FOnConnect(connector.Conn)
 				} else {
+					println(connector.ConID, "广播来了XX", connector.status)
 					connector.connectChan <- true
 				}
 			} else if (connector.status == disconnect) || (connector.status == shutdown) {
@@ -102,7 +107,6 @@ func (svr *Server) broadcast() {
 					svr.FOnError(connector.Conn, connector.err)
 				}
 				if connector.status == connecterr {
-					connector.init()
 					svr.connectorPool.Put(connector)
 				}
 			}
@@ -126,6 +130,7 @@ func (svr *Server) Start() error {
 	for {
 		conn, err := svr.listener.Accept()
 		connector := svr.connectorPool.Get().(*Connector)
+		connector.init()
 		connector.Conn = conn
 
 		id++
@@ -140,9 +145,8 @@ func (svr *Server) Start() error {
 			svr.doChan <- connector
 			continue
 		}
-		//connector.ctx, connector.cancel = context.WithCancel(context.Background())
-		go svr.handlerConnector(connector) //处理接收数据
-		go connector.connectorSendData()   //处理发送数据
+
+		go connector.start()
 	}
 }
 
@@ -151,50 +155,15 @@ func (svr *Server) Stop() {
 	close(svr.doChan)
 }
 
-func (svr *Server) handlerConnector(connector *Connector) {
-	defer func() {
-		connector.Close()
-		connector.init()
-		svr.connectorPool.Put(connector)
-	}()
-	svr.doChan <- connector
-	if !<-connector.connectChan {
-		return
-	}
-
-	connector.status = connected
-	closed := false
-	var err error
+func (connector *Connector) sendData() {
 	for {
 		select {
-		default:
+		case <-connector.ctx.Done():
 			{
-				closed, err = connector.readerwriter.ReadData(connector)
-				if err != nil {
-					if err == io.EOF {
-						connector.status = disconnect
-						svr.doChan <- connector
-					} else {
-						connector.status = readerr
-						connector.err = err
-						svr.doChan <- connector
-					}
-					return
-				}
-
-				if closed {
-					connector.status = shutdown
-					svr.doChan <- connector
-					return
-				}
+				println("关闭chan")
+				return
 			}
-		}
-	}
-}
 
-func (connector *Connector) connectorSendData() {
-	for {
-		select {
 		case senddata, ok := <-connector.SendDataChan:
 			{
 				if ok {
@@ -211,19 +180,96 @@ func (connector *Connector) connectorSendData() {
 
 			}
 		}
-
 	}
+}
+
+func (connector *Connector) recvData() {
+	connector.status = connected
+	closed := false
+	var err error
+	atomic.AddInt32(&connector.RefCount, 1)
+end:
+	for {
+		select {
+		case <-connector.ctx.Done():
+			{
+				break end
+			}
+		default:
+			{
+				closed, err = connector.readerwriter.ReadData(connector)
+				if err != nil {
+					if err == io.EOF {
+						connector.status = disconnect
+						connector.svr.doChan <- connector
+					} else {
+						connector.status = readerr
+						connector.err = err
+						connector.svr.doChan <- connector
+					}
+					break end
+				}
+
+				if closed {
+					connector.status = shutdown
+					connector.svr.doChan <- connector
+					break end
+				}
+			}
+		}
+	}
+	connector.Stop()
+	atomic.AddInt32(&connector.RefCount, -1)
+	connector.HandleEnd()
 }
 
 func (connector *Connector) SendData(dataEx any, data []byte) {
 	connector.readerwriter.WriteData(connector, dataEx, data)
 }
 
-func (connector *Connector) Close() {
-	if !atomic.CompareAndSwapInt32(&connector.closeInt, 1, 2) {
+func (connector *Connector) start() {
+	connector.connectChan = make(chan bool)
+	println(connector.ConID, "连接上来了")
+	connector.svr.doChan <- connector
+	if !<-connector.connectChan {
+		connector.svr.connectorPool.Put(connector)
 		return
 	}
-	_ = connector.Conn.Close()
-	close(connector.SendDataChan)
-	//connector.cancel()
+	connector.SendDataChan = make(chan []byte, 1000)
+
+	connector.ctx, connector.cancel = context.WithCancel(context.Background())
+	go connector.recvData()
+	go connector.sendData() //处理发送数据
+}
+
+func (connector *Connector) Stop() {
+	connector.Lock()
+	defer connector.Unlock()
+	if connector.Closed {
+		return
+	}
+	connector.Closed = true
+
+	println(connector.ConID, "关闭了")
+	connector.cancel()
+}
+
+func (connector *Connector) CheckClosed() bool {
+	connector.RLock()
+	defer connector.RUnlock()
+	if !connector.Closed {
+		return false
+	}
+	return true
+}
+
+func (connector *Connector) HandleEnd() {
+	if connector.CheckClosed() {
+		if connector.RefCount == 0 {
+			connector.Conn.Close()
+			close(connector.SendDataChan)
+			close(connector.connectChan)
+			connector.svr.connectorPool.Put(connector)
+		}
+	}
 }
