@@ -5,6 +5,7 @@ package tcpEx
 */
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -41,6 +42,7 @@ type ITcpReaderWriter interface {
 
 type Connector struct {
 	sync.RWMutex
+	logidx       uint32
 	ConID        uint32
 	Conn         net.Conn
 	SendDataChan chan []byte
@@ -65,6 +67,9 @@ type Server struct {
 	FOnError      TOnError
 }
 
+var ConnectCount int32 = 0
+var conidx uint32 = 0
+
 func (connector *Connector) init() {
 	connector.Conn = nil
 	connector.status = connecting
@@ -79,25 +84,32 @@ func NewServe(addr string, readImpl ITcpReaderWriter) *Server {
 		doChan: make(chan *Connector, 1000),
 	}
 	result.connectorPool = sync.Pool{New: func() any {
-		return &Connector{status: connecting, readerwriter: readImpl.NewReaderWriter(), svr: result}
+		return &Connector{status: connecting, readerwriter: readImpl.NewReaderWriter(), svr: result, logidx: atomic.AddUint32(&conidx, 1)}
 	}}
 	return result
 }
 
 func (svr *Server) broadcast() {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
 	ok := false
 	var connector *Connector
 	for {
 		select {
 		case connector, ok = <-svr.doChan:
-			println(connector.ConID, "广播来了", connector.status)
+
 			if connector.status == connecting {
+				fmt.Println(connector.ConID, connector.logidx, "connecting", connector.status)
 				if svr.FOnConnect != nil {
 					connector.connectChan <- svr.FOnConnect(connector.Conn)
 				} else {
-					println(connector.ConID, "广播来了XX", connector.status)
 					connector.connectChan <- true
 				}
+				fmt.Println(connector.ConID, connector.logidx, "connecting Over", connector.status)
 			} else if (connector.status == disconnect) || (connector.status == shutdown) {
 				if svr.FOnDisConnect != nil {
 					svr.FOnDisConnect(connector.Conn)
@@ -129,6 +141,10 @@ func (svr *Server) Start() error {
 	var id uint32 = 0
 	for {
 		conn, err := svr.listener.Accept()
+		if atomic.LoadInt32(&ConnectCount) > 10000 {
+			fmt.Println("当前连接数，", ConnectCount)
+			continue
+		}
 		connector := svr.connectorPool.Get().(*Connector)
 		connector.init()
 		connector.Conn = conn
@@ -145,7 +161,6 @@ func (svr *Server) Start() error {
 			svr.doChan <- connector
 			continue
 		}
-
 		go connector.start()
 	}
 }
@@ -156,11 +171,17 @@ func (svr *Server) Stop() {
 }
 
 func (connector *Connector) sendData() {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Println(err, connector.logidx)
+		}
+	}()
 	for {
 		select {
 		case <-connector.ctx.Done():
 			{
-				println("关闭chan")
+				fmt.Println("离开sendData", connector.logidx)
 				return
 			}
 
@@ -184,6 +205,12 @@ func (connector *Connector) sendData() {
 }
 
 func (connector *Connector) recvData() {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Println(err, connector.logidx)
+		}
+	}()
 	connector.status = connected
 	closed := false
 	var err error
@@ -193,6 +220,7 @@ end:
 		select {
 		case <-connector.ctx.Done():
 			{
+				fmt.Println("ctx取消离开recvData", connector.logidx)
 				break end
 			}
 		default:
@@ -228,15 +256,21 @@ func (connector *Connector) SendData(dataEx any, data []byte) {
 }
 
 func (connector *Connector) start() {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Println(err, connector.logidx)
+		}
+	}()
 	connector.connectChan = make(chan bool)
-	println(connector.ConID, "连接上来了")
+	fmt.Println(connector.ConID, connector.logidx, "连接上来了")
 	connector.svr.doChan <- connector
 	if !<-connector.connectChan {
 		connector.svr.connectorPool.Put(connector)
 		return
 	}
 	connector.SendDataChan = make(chan []byte, 1000)
-
+	atomic.AddInt32(&ConnectCount, 1)
 	connector.ctx, connector.cancel = context.WithCancel(context.Background())
 	go connector.recvData()
 	go connector.sendData() //处理发送数据
@@ -250,8 +284,9 @@ func (connector *Connector) Stop() {
 	}
 	connector.Closed = true
 
-	println(connector.ConID, "关闭了")
+	fmt.Println(connector.ConID, connector.logidx, "Stop()")
 	connector.cancel()
+	atomic.AddInt32(&ConnectCount, -1)
 }
 
 func (connector *Connector) CheckClosed() bool {
@@ -265,10 +300,11 @@ func (connector *Connector) CheckClosed() bool {
 
 func (connector *Connector) HandleEnd() {
 	if connector.CheckClosed() {
-		if connector.RefCount == 0 {
-			connector.Conn.Close()
+		if atomic.LoadInt32(&connector.RefCount) == 0 {
 			close(connector.SendDataChan)
 			close(connector.connectChan)
+			connector.Conn.Close()
+			fmt.Println(connector.ConID, connector.logidx, "关闭连接，chan, Push进池", ConnectCount)
 			connector.svr.connectorPool.Put(connector)
 		}
 	}
