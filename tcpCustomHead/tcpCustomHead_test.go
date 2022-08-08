@@ -60,7 +60,7 @@ func TestNewtcpServe(t *testing.T) {
 				c := make([]byte, len)
 				io.ReadFull(con, c)
 				time.Sleep(100)
-				//println("我是客户端", index, "号，请求ID:", id, string(c), a)
+				println("我是客户端", index, "号，请求ID:", id, string(c), a)
 				atomic.AddInt32(&a, 1)
 			}
 		}(i)

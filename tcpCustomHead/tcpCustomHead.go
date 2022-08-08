@@ -85,13 +85,14 @@ func (p *Packet) ReadContent(connector *tcp.Connector) (ok bool, closed bool, er
 			return ok, true, err
 		}
 		defer connector.RUnlock()
-
+		packData := make([]byte, len(tmpdata))
+		copy(packData, tmpdata)
 		go func() {
 			defer func() {
 				atomic.AddInt32(&connector.RefCount, -1)
 				connector.HandleEnd()
 			}()
-			handle.Handler(connector, ok, tmpdata)
+			handle.Handler(connector, ok, packData)
 		}()
 	}
 	return ok, false, err
