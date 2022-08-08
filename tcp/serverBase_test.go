@@ -1,4 +1,4 @@
-package tcpEx
+package tcp
 
 import (
 	"fmt"

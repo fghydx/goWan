@@ -1,4 +1,4 @@
-package tcpEx
+package tcp
 
 /*
 	传入实现ITcpReader的对像，完成对Socket的读取操作
@@ -103,24 +103,29 @@ func (svr *Server) broadcast() {
 		case connector, ok = <-svr.doChan:
 
 			if connector.status == connecting {
-				fmt.Println(connector.ConID, connector.logidx, "connecting", connector.status)
+				//fmt.Println(connector.ConID, connector.logidx, "connecting", connector.status)
 				if svr.FOnConnect != nil {
 					connector.connectChan <- svr.FOnConnect(connector.Conn)
 				} else {
 					connector.connectChan <- true
 				}
-				fmt.Println(connector.ConID, connector.logidx, "connecting Over", connector.status)
-			} else if (connector.status == disconnect) || (connector.status == shutdown) {
-				if svr.FOnDisConnect != nil {
-					svr.FOnDisConnect(connector.Conn)
+				//fmt.Println(connector.ConID, connector.logidx, "connecting Over", connector.status)
+			} else {
+				close(connector.SendDataChan)
+				close(connector.connectChan)
+				if (connector.status == disconnect) || (connector.status == shutdown) {
+					if svr.FOnDisConnect != nil {
+						svr.FOnDisConnect(connector.Conn)
+					}
+				} else if connector.status == readerr || connector.status == connecterr {
+					if svr.FOnError != nil {
+						svr.FOnError(connector.Conn, connector.err)
+					}
+					if connector.status == connecterr {
+
+					}
 				}
-			} else if connector.status == readerr || connector.status == connecterr {
-				if svr.FOnError != nil {
-					svr.FOnError(connector.Conn, connector.err)
-				}
-				if connector.status == connecterr {
-					svr.connectorPool.Put(connector)
-				}
+				svr.connectorPool.Put(connector)
 			}
 		}
 		if !ok {
@@ -142,7 +147,7 @@ func (svr *Server) Start() error {
 	for {
 		conn, err := svr.listener.Accept()
 		if atomic.LoadInt32(&ConnectCount) > 10000 {
-			fmt.Println("当前连接数，", ConnectCount)
+			//fmt.Println("当前连接数，", ConnectCount)
 			continue
 		}
 		connector := svr.connectorPool.Get().(*Connector)
@@ -181,7 +186,7 @@ func (connector *Connector) sendData() {
 		select {
 		case <-connector.ctx.Done():
 			{
-				fmt.Println("离开sendData", connector.logidx)
+				//fmt.Println("离开sendData", connector.logidx)
 				return
 			}
 
@@ -220,7 +225,7 @@ end:
 		select {
 		case <-connector.ctx.Done():
 			{
-				fmt.Println("ctx取消离开recvData", connector.logidx)
+				//fmt.Println("ctx取消离开recvData", connector.logidx)
 				break end
 			}
 		default:
@@ -263,10 +268,11 @@ func (connector *Connector) start() {
 		}
 	}()
 	connector.connectChan = make(chan bool)
-	fmt.Println(connector.ConID, connector.logidx, "连接上来了")
+	//fmt.Println(connector.ConID, connector.logidx, "连接上来了")
 	connector.svr.doChan <- connector
 	if !<-connector.connectChan {
-		connector.svr.connectorPool.Put(connector)
+		connector.status = disconnect
+		connector.svr.doChan <- connector
 		return
 	}
 	connector.SendDataChan = make(chan []byte, 1000)
@@ -284,7 +290,7 @@ func (connector *Connector) Stop() {
 	}
 	connector.Closed = true
 
-	fmt.Println(connector.ConID, connector.logidx, "Stop()")
+	//fmt.Println(connector.ConID, connector.logidx, "Stop()")
 	connector.cancel()
 	atomic.AddInt32(&ConnectCount, -1)
 }
@@ -301,11 +307,7 @@ func (connector *Connector) CheckClosed() bool {
 func (connector *Connector) HandleEnd() {
 	if connector.CheckClosed() {
 		if atomic.LoadInt32(&connector.RefCount) == 0 {
-			close(connector.SendDataChan)
-			close(connector.connectChan)
 			connector.Conn.Close()
-			fmt.Println(connector.ConID, connector.logidx, "关闭连接，chan, Push进池", ConnectCount)
-			connector.svr.connectorPool.Put(connector)
 		}
 	}
 }
