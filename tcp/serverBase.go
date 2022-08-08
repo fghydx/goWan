@@ -295,17 +295,10 @@ func (connector *Connector) Stop() {
 	atomic.AddInt32(&ConnectCount, -1)
 }
 
-func (connector *Connector) CheckClosed() bool {
+func (connector *Connector) HandleEnd() {
 	connector.RLock()
 	defer connector.RUnlock()
-	if !connector.Closed {
-		return false
-	}
-	return true
-}
-
-func (connector *Connector) HandleEnd() {
-	if connector.CheckClosed() {
+	if connector.Closed {
 		if atomic.LoadInt32(&connector.RefCount) == 0 {
 			connector.Conn.Close()
 		}
