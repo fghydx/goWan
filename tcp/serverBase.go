@@ -33,6 +33,16 @@ type (
 	TOnError      func(conn net.Conn, err error)
 )
 
+type HandFunc func(conn *Connector, packetEnd bool, data []byte)
+
+type IHandler interface {
+	Handler(conn *Connector, packetEnd bool, data []byte)
+}
+
+func (f HandFunc) Handler(conn *Connector, packetEnd bool, data []byte) {
+	f(conn, packetEnd, data)
+}
+
 type ITcpReaderWriter interface {
 	ReadData(connector *Connector) (closed bool, err error)
 	WriteData(connector *Connector, dataEx any, data []byte)
@@ -48,7 +58,7 @@ type Connector struct {
 	SendDataChan chan []byte
 	RefCount     int32
 	status       tcpStatus
-	svr          *Server
+	Svr          *Server
 	ctx          context.Context
 	cancel       context.CancelFunc
 	connectChan  chan bool
@@ -62,9 +72,11 @@ type Server struct {
 	listener      net.Listener
 	doChan        chan *Connector
 	connectorPool sync.Pool
+	Connectors    sync.Map;
 	FOnConnect    TOnConnect
 	FOnDisConnect TOnDisConnect
 	FOnError      TOnError
+	HandlerMap map[uint32]IHandler
 }
 
 var ConnectCount int32 = 0
@@ -84,8 +96,9 @@ func NewServe(addr string, readImpl ITcpReaderWriter) *Server {
 		doChan: make(chan *Connector, 1000),
 	}
 	result.connectorPool = sync.Pool{New: func() any {
-		return &Connector{status: connecting, readerwriter: readImpl.NewReaderWriter(), svr: result, logidx: atomic.AddUint32(&conidx, 1)}
+		return &Connector{status: connecting, readerwriter: readImpl.NewReaderWriter(), Svr: result, logidx: atomic.AddUint32(&conidx, 1)}
 	}}
+	result.HandlerMap = make(map[uint32]IHandler)
 	return result
 }
 
@@ -125,6 +138,7 @@ func (svr *Server) broadcast() {
 
 					}
 				}
+				svr.Connectors.Delete(connector.ConID)
 				svr.connectorPool.Put(connector)
 			}
 		}
@@ -166,6 +180,7 @@ func (svr *Server) Start() error {
 			svr.doChan <- connector
 			continue
 		}
+
 		go connector.start()
 	}
 }
@@ -173,6 +188,10 @@ func (svr *Server) Start() error {
 func (svr *Server) Stop() {
 	_ = svr.listener.Close()
 	close(svr.doChan)
+}
+
+func (this *Server) RegisterHandler(ID uint32, handler HandFunc) {
+	this.HandlerMap[ID] = &handler
 }
 
 func (connector *Connector) sendData() {
@@ -197,7 +216,7 @@ func (connector *Connector) sendData() {
 					if err != nil {
 						connector.status = senderr
 						connector.err = err
-						connector.svr.doChan <- connector
+						connector.Svr.doChan <- connector
 						return
 					}
 				} else {
@@ -234,18 +253,18 @@ end:
 				if err != nil {
 					if err == io.EOF {
 						connector.status = disconnect
-						connector.svr.doChan <- connector
+						connector.Svr.doChan <- connector
 					} else {
 						connector.status = readerr
 						connector.err = err
-						connector.svr.doChan <- connector
+						connector.Svr.doChan <- connector
 					}
 					break end
 				}
 
 				if closed {
 					connector.status = shutdown
-					connector.svr.doChan <- connector
+					connector.Svr.doChan <- connector
 					break end
 				}
 			}
@@ -269,12 +288,13 @@ func (connector *Connector) start() {
 	}()
 	connector.connectChan = make(chan bool)
 	//fmt.Println(connector.ConID, connector.logidx, "连接上来了")
-	connector.svr.doChan <- connector
+	connector.Svr.doChan <- connector
 	if !<-connector.connectChan {
 		connector.status = disconnect
-		connector.svr.doChan <- connector
+		connector.Svr.doChan <- connector
 		return
 	}
+	connector.Svr.Connectors.Store(connector.ConID,connector)
 	connector.SendDataChan = make(chan []byte, 1000)
 	atomic.AddInt32(&ConnectCount, 1)
 	connector.ctx, connector.cancel = context.WithCancel(context.Background())
