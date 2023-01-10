@@ -276,6 +276,12 @@ end:
 }
 
 func (connector *Connector) SendData(dataEx any, data []byte) {
+	defer func() {
+		err := recover()
+		if err != nil {
+		println("发送数据时出错：err:", err.(error).Error())
+	   	}
+	}()
 	connector.readerwriter.WriteData(connector, dataEx, data)
 }
 
