@@ -28,9 +28,9 @@ const (
 )
 
 type (
-	TOnConnect    func(conn net.Conn) bool
-	TOnDisConnect func(conn net.Conn)
-	TOnError      func(conn net.Conn, err error)
+	TOnConnect    func(conn *Connector) bool
+	TOnDisConnect func(conn *Connector)
+	TOnError      func(conn *Connector, err error)
 )
 
 type HandFunc func(conn *Connector, packetEnd bool, data []byte)
@@ -118,7 +118,7 @@ func (svr *Server) broadcast() {
 			if connector.status == connecting {
 				//fmt.Println(connector.ConID, connector.logidx, "connecting", connector.status)
 				if svr.FOnConnect != nil {
-					connector.connectChan <- svr.FOnConnect(connector.Conn)
+					connector.connectChan <- svr.FOnConnect(connector)
 				} else {
 					connector.connectChan <- true
 				}
@@ -128,11 +128,11 @@ func (svr *Server) broadcast() {
 				close(connector.connectChan)
 				if (connector.status == disconnect) || (connector.status == shutdown) {
 					if svr.FOnDisConnect != nil {
-						svr.FOnDisConnect(connector.Conn)
+						svr.FOnDisConnect(connector)
 					}
 				} else if connector.status == readerr || connector.status == connecterr {
 					if svr.FOnError != nil {
-						svr.FOnError(connector.Conn, connector.err)
+						svr.FOnError(connector, connector.err)
 					}
 					if connector.status == connecterr {
 
